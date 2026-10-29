@@ -2,12 +2,15 @@
 pipeline {
     agent any
 
-    stages {
+    options {
+        timestamps()
+    }
 
+    stages {
         stage('1. Checkout') {
             steps {
                 checkout scm
-                echo 'GitHub source code checked out successfully.'
+                echo 'V2 source code checked out successfully.'
             }
         }
 
@@ -16,32 +19,26 @@ pipeline {
                 powershell '''
                     $ErrorActionPreference = "Stop"
 
-                    $PYTHON = "C:\\Users\\hp\\expense_tracker\\.venv\\Scripts\\python.exe"
+                    $PYTHON = "C:\\Users\\hp\\expense_tracker_v2\\.venv\\Scripts\\python.exe"
                     $DOCKER = "C:\\Users\\hp\\AppData\\Local\\Programs\\DockerDesktop\\resources\\bin\\docker.exe"
                     $KUBECTL = "C:\\Users\\hp\\AppData\\Local\\Programs\\DockerDesktop\\resources\\bin\\kubectl.exe"
 
-                    Write-Host "Checking Python..."
-                    if (-not (Test-Path $PYTHON)) {
-                        throw "Python not found: $PYTHON"
+                    foreach ($tool in @($PYTHON, $DOCKER, $KUBECTL)) {
+                        if (-not (Test-Path $tool)) {
+                            throw "Tool not found: $tool"
+                        }
                     }
+
                     & $PYTHON --version
                     if ($LASTEXITCODE -ne 0) { throw "Python check failed" }
 
-                    Write-Host "Checking Docker..."
-                    if (-not (Test-Path $DOCKER)) {
-                        throw "Docker not found: $DOCKER"
-                    }
                     & $DOCKER --version
                     if ($LASTEXITCODE -ne 0) { throw "Docker check failed" }
 
-                    Write-Host "Checking kubectl..."
-                    if (-not (Test-Path $KUBECTL)) {
-                        throw "kubectl not found: $KUBECTL"
-                    }
                     & $KUBECTL version --client
                     if ($LASTEXITCODE -ne 0) { throw "kubectl check failed" }
 
-                    Write-Host "All tools are available."
+                    Write-Host "V2 tools checked successfully."
                 '''
             }
         }
@@ -50,21 +47,16 @@ pipeline {
             steps {
                 powershell '''
                     $ErrorActionPreference = "Stop"
-                    $PYTHON = "C:\\Users\\hp\\expense_tracker\\.venv\\Scripts\\python.exe"
-
-                    Write-Host "Installing Python dependencies..."
+                    $PYTHON = "C:\\Users\\hp\\expense_tracker_v2\\.venv\\Scripts\\python.exe"
 
                     if (-not (Test-Path "requirements.txt")) {
                         throw "requirements.txt not found"
                     }
 
                     & $PYTHON -m pip install -r requirements.txt
-
                     if ($LASTEXITCODE -ne 0) {
                         throw "Dependency installation failed"
                     }
-
-                    Write-Host "Dependencies installed successfully."
                 '''
             }
         }
@@ -73,17 +65,12 @@ pipeline {
             steps {
                 powershell '''
                     $ErrorActionPreference = "Stop"
-                    $PYTHON = "C:\\Users\\hp\\expense_tracker\\.venv\\Scripts\\python.exe"
+                    $PYTHON = "C:\\Users\\hp\\expense_tracker_v2\\.venv\\Scripts\\python.exe"
 
-                    Write-Host "Testing Flask application..."
-
-                    & $PYTHON -c "from app import app; print('Flask application loaded successfully')"
-
+                    & $PYTHON -c "from app import app; print('V2 Flask application loaded successfully')"
                     if ($LASTEXITCODE -ne 0) {
-                        throw "Flask application test failed"
+                        throw "V2 application test failed"
                     }
-
-                    Write-Host "Application test passed."
                 '''
             }
         }
@@ -94,110 +81,87 @@ pipeline {
                     $ErrorActionPreference = "Stop"
                     $DOCKER = "C:\\Users\\hp\\AppData\\Local\\Programs\\DockerDesktop\\resources\\bin\\docker.exe"
 
-                    Write-Host "Building Expense Tracker V1 image..."
-
                     if (-not (Test-Path "Dockerfile")) {
                         throw "Dockerfile not found"
                     }
 
-                    & $DOCKER build -t expense-tracker:v1 .
-
+                    Write-Host "Building Expense Tracker V2 image..."
+                    & $DOCKER build -t expense-tracker:v2 .
                     if ($LASTEXITCODE -ne 0) {
-                        throw "Docker image build failed"
+                        throw "V2 Docker build failed"
                     }
 
-                    Write-Host "Verifying Docker image..."
-                    & $DOCKER image inspect expense-tracker:v1
-
+                    & $DOCKER image inspect expense-tracker:v2
                     if ($LASTEXITCODE -ne 0) {
-                        throw "Docker image verification failed"
+                        throw "V2 image verification failed"
                     }
-
-                    Write-Host "Docker image built successfully."
                 '''
             }
         }
 
-        stage('6. Deploy to Kubernetes') {
+        stage('6. Deploy V2 to Kubernetes') {
             steps {
                 powershell '''
                     $ErrorActionPreference = "Stop"
-
                     $KUBECTL = "C:\\Users\\hp\\AppData\\Local\\Programs\\DockerDesktop\\resources\\bin\\kubectl.exe"
                     $env:KUBECONFIG = "C:\\Users\\hp\\.kube\\config"
 
-                    Write-Host "Checking Kubernetes configuration..."
-
-                    if (-not (Test-Path $env:KUBECONFIG)) {
-                        throw "Kubernetes config file not found: $env:KUBECONFIG"
-                    }
-
-                    & $KUBECTL config get-contexts
-                    if ($LASTEXITCODE -ne 0) {
-                        throw "Unable to read Kubernetes contexts"
-                    }
-
-                    Write-Host "Selecting docker-desktop context..."
                     & $KUBECTL config use-context docker-desktop
                     if ($LASTEXITCODE -ne 0) {
                         throw "Could not select docker-desktop context"
                     }
 
-                    Write-Host "Checking Kubernetes nodes..."
                     & $KUBECTL get nodes
                     if ($LASTEXITCODE -ne 0) {
-                        throw "Cannot connect to Kubernetes cluster"
+                        throw "Cannot connect to Kubernetes"
                     }
 
-                    Write-Host "Checking deployment.yaml..."
                     if (-not (Test-Path "deployment.yaml")) {
-                        throw "deployment.yaml not found in Jenkins workspace"
+                        throw "deployment.yaml not found"
                     }
 
-                    Write-Host "Applying Kubernetes configuration..."
+                    Write-Host "Applying V2 Kubernetes configuration..."
                     & $KUBECTL apply -f deployment.yaml
                     if ($LASTEXITCODE -ne 0) {
-                        throw "Failed to apply deployment.yaml"
+                        throw "V2 Kubernetes configuration failed"
                     }
 
-                    Write-Host "Waiting for deployment rollout..."
-                    & $KUBECTL rollout status deployment/expense-tracker --timeout=180s
+                    & $KUBECTL rollout status deployment/expense-v2 --timeout=180s
                     if ($LASTEXITCODE -ne 0) {
-                        throw "Deployment rollout failed"
+                        throw "V2 rollout failed"
                     }
-
-                    Write-Host "Kubernetes deployment completed successfully."
                 '''
             }
         }
 
-        stage('7. Verify Deployment') {
+        stage('7. Verify V2 Deployment') {
             steps {
                 powershell '''
                     $ErrorActionPreference = "Stop"
-
                     $KUBECTL = "C:\\Users\\hp\\AppData\\Local\\Programs\\DockerDesktop\\resources\\bin\\kubectl.exe"
                     $env:KUBECONFIG = "C:\\Users\\hp\\.kube\\config"
 
-                    Write-Host "Checking Kubernetes deployment..."
-                    & $KUBECTL get deployments
+                    & $KUBECTL get deployment expense-v2
                     if ($LASTEXITCODE -ne 0) {
-                        throw "Failed to get deployments"
+                        throw "V2 deployment not found"
                     }
 
-                    Write-Host "Checking pods..."
                     & $KUBECTL get pods
                     if ($LASTEXITCODE -ne 0) {
-                        throw "Failed to get pods"
+                        throw "Could not list pods"
                     }
 
-                    Write-Host "Checking services..."
                     & $KUBECTL get services
                     if ($LASTEXITCODE -ne 0) {
-                        throw "Failed to get services"
+                        throw "Could not list services"
                     }
 
-                    Write-Host "Deployment verification completed."
+                    & $KUBECTL get deployment expense-tracker
+                    if ($LASTEXITCODE -ne 0) {
+                        Write-Host "Warning: V1 deployment was not found."
+                    }
+
+                    Write-Host "V2 verification completed."
                 '''
             }
         }
@@ -205,9 +169,8 @@ pipeline {
 
     post {
         success {
-            echo 'SUCCESS: Expense Tracker pipeline completed.'
+            echo 'SUCCESS: Expense Tracker V2 pipeline completed.'
         }
-
         failure {
             echo 'FAILURE: Check Console Output for the failed stage.'
         }
